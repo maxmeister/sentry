@@ -27,6 +27,7 @@ from sentry.utils.dates import to_timestamp
 from sentry.utils.snuba import DATASETS, get_json_type
 
 WILDCARD_CHARS = re.compile(r"[\*]")
+SORTED_PROJECT_SLUG = "sorted.project.index"
 
 
 def translate(pat):
@@ -982,6 +983,26 @@ def resolve_orderby(orderby, fields, aggregations):
     validated = []
     for column in orderby:
         bare_column = column.lstrip("-")
+        if bare_column == SORTED_PROJECT_SLUG:
+            sorted_project_ids = [
+                six.binary_type(pid)
+                for pid in Project.objects.filter(id__in=project_ids)
+                .order_by("slug")
+                .values_list("id", flat=True)
+            ]  # sort projects and cast id to string for the aggregation, can't use repr which includes `L`
+            aggregations.append(
+                [
+                    "transform(project_id, [{}], {})".format(
+                        ",".join(sorted_project_ids),
+                        range(
+                            len(sorted_project_ids)
+                        ),  # transform project_ids to their index in the sorted project list
+                    ),
+                    None,
+                    SORTED_PROJECT_SLUG,
+                ]
+            )
+
         if bare_column in fields:
             validated.append(column)
             continue
@@ -1090,7 +1111,10 @@ def resolve_field_list(fields, snuba_args, auto_fields=True):
 
     orderby = snuba_args.get("orderby")
     if orderby:
-        orderby = resolve_orderby(orderby, columns, aggregations)
+        project_id = snuba_args["filter_keys"].get(
+            "project_id", []
+        )  # only gets used if sorting by project
+        orderby = resolve_orderby(orderby, columns, aggregations, project_id)
 
     # If aggregations are present all columns
     # need to be added to the group by so that the query is valid.

@@ -246,7 +246,7 @@ export const SPECIAL_FIELDS: SpecialFields = {
     },
   },
   project: {
-    sortField: null,
+    sortField: 'sorted.project.index',
     renderFunc: (data, {organization}) => {
       const project = organization.projects.find(p => p.slug === data['project.name']);
       return (
