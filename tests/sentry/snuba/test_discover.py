@@ -7,7 +7,6 @@ from sentry.utils.compat.mock import patch
 from datetime import datetime, timedelta
 
 from sentry import eventstore
-from sentry.models import Project
 from sentry.api.event_search import InvalidSearchQuery
 from sentry.snuba import discover
 from sentry.testutils import TestCase, SnubaTestCase
@@ -34,53 +33,65 @@ class QueryIntegrationTest(SnubaTestCase, TestCase):
             project_id=self.project.id,
         )
 
+    def test_project_mapping(self):
+        other_project = self.create_project(organization=self.organization)
+        self.store_event(
+            data={"message": "hello", "timestamp": iso_format(before_now(minutes=1))},
+            project_id=other_project.id,
+        )
+
+        result = discover.query(
+            selected_columns=["project", "message"],
+            query="",
+            params={"project_id": [other_project.id]},
+            orderby="project",
+        )
+
+        data = result["data"]
+        assert len(data) == 1
+        assert data[0]["project"] == other_project.slug
+
     def test_sorting_project_name(self):
-        project_mapping = {}
+        project_ids = []
         for project_name in ["a" * 32, "z" * 32, "m" * 32]:
             other_project = self.create_project(organization=self.organization, slug=project_name)
-            project_mapping[other_project.id] = project_name
+            project_ids.append(other_project.id)
             self.store_event(
-                data={"message": project_name, "timestamp": iso_format(before_now(minutes=1))},
+                data={"message": "ohh no", "timestamp": iso_format(before_now(minutes=1))},
                 project_id=other_project.id,
             )
 
         result = discover.query(
             selected_columns=["project", "message"],
             query="",
-            params={"project_id": project_mapping.keys()},
-            orderby="sorted.project.index",
+            params={"project_id": project_ids},
+            orderby="project",
         )
         data = result["data"]
         assert len(data) == 3
-        project1 = Project.objects.get(id=data[0]["project.id"]).slug
-        project2 = Project.objects.get(id=data[1]["project.id"]).slug
-        project3 = Project.objects.get(id=data[2]["project.id"]).slug
-        assert project1 < project2
-        assert project2 < project3
+        assert data[0]["project"] < data[1]["project"]
+        assert data[1]["project"] < data[2]["project"]
 
     def test_reverse_sorting_project_name(self):
-        project_mapping = {}
+        project_ids = []
         for project_name in ["a" * 32, "z" * 32, "m" * 32]:
             other_project = self.create_project(organization=self.organization, slug=project_name)
-            project_mapping[other_project.id] = project_name
+            project_ids.append(other_project.id)
             self.store_event(
-                data={"message": project_name, "timestamp": iso_format(before_now(minutes=1))},
+                data={"message": "ohh no", "timestamp": iso_format(before_now(minutes=1))},
                 project_id=other_project.id,
             )
 
         result = discover.query(
             selected_columns=["project", "message"],
             query="",
-            params={"project_id": project_mapping.keys()},
-            orderby="-sorted.project.index",
+            params={"project_id": project_ids},
+            orderby="-project",
         )
         data = result["data"]
         assert len(data) == 3
-        project1 = Project.objects.get(id=data[0]["project.id"]).slug
-        project2 = Project.objects.get(id=data[1]["project.id"]).slug
-        project3 = Project.objects.get(id=data[2]["project.id"]).slug
-        assert project1 > project2
-        assert project2 > project3
+        assert data[0]["project"] > data[1]["project"]
+        assert data[1]["project"] > data[2]["project"]
 
     def test_field_aliasing_in_selected_columns(self):
         result = discover.query(
@@ -287,13 +298,21 @@ class QueryTransformTest(TestCase):
         )
         mock_query.assert_called_with(
             selected_columns=["user_id", "username", "email", "ip_address", "project_id"],
-            aggregations=[],
+            aggregations=[
+                [
+                    "transform(project_id, [{}], {}, '')".format(
+                        six.binary_type(self.project.id), [six.binary_type(self.project.slug)]
+                    ),
+                    None,
+                    "project",
+                ]
+            ],
             filter_keys={"project_id": [self.project.id]},
             dataset=Dataset.Discover,
             end=None,
             start=None,
             conditions=[],
-            groupby=[],
+            groupby=["user_id", "username", "email", "ip_address", "project_id"],
             having=[],
             orderby=None,
             limit=50,

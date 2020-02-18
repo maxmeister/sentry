@@ -246,16 +246,12 @@ export const SPECIAL_FIELDS: SpecialFields = {
     },
   },
   project: {
-    sortField: 'sorted.project.index',
+    sortField: 'project',
     renderFunc: (data, {organization}) => {
-      const project = organization.projects.find(p => p.slug === data['project.name']);
+      const project = organization.projects.find(p => p.slug === data.project);
       return (
         <Container>
-          {project ? (
-            <ProjectBadge project={project} avatarSize={16} />
-          ) : (
-            data['project.name']
-          )}
+          {project ? <ProjectBadge project={project} avatarSize={16} /> : data.project}
         </Container>
       );
     },

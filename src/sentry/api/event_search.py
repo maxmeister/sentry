@@ -27,7 +27,6 @@ from sentry.utils.dates import to_timestamp
 from sentry.utils.snuba import DATASETS, get_json_type
 
 WILDCARD_CHARS = re.compile(r"[\*]")
-SORTED_PROJECT_SLUG = "sorted.project.index"
 
 
 def translate(pat):
@@ -983,25 +982,6 @@ def resolve_orderby(orderby, fields, aggregations):
     validated = []
     for column in orderby:
         bare_column = column.lstrip("-")
-        if bare_column == SORTED_PROJECT_SLUG:
-            sorted_project_ids = [
-                six.binary_type(pid)
-                for pid in Project.objects.filter(id__in=project_ids)
-                .order_by("slug")
-                .values_list("id", flat=True)
-            ]  # sort projects and cast id to string for the aggregation, can't use repr which includes `L`
-            aggregations.append(
-                [
-                    "transform(project_id, [{}], {})".format(
-                        ",".join(sorted_project_ids),
-                        range(
-                            len(sorted_project_ids)
-                        ),  # transform project_ids to their index in the sorted project list
-                    ),
-                    None,
-                    SORTED_PROJECT_SLUG,
-                ]
-            )
 
         if bare_column in fields:
             validated.append(column)
@@ -1071,16 +1051,31 @@ def resolve_field_list(fields, snuba_args, auto_fields=True):
     groupby that can be merged into the result of get_snuba_query_args()
     to build a more complete snuba query based on event search conventions.
     """
-    # If project.name is requested, get the project.id from Snuba so we
-    # can use this to look up the name in Sentry
-    if "project.name" in fields:
-        fields.remove("project.name")
-        if "project.id" not in fields:
-            fields.append("project.id")
-
     aggregations = []
     columns = []
     groupby = []
+
+    # If project is requested, we need to map ids to their names since snuba only has ids
+    if "project" in fields:
+        fields.remove("project")
+        if "project.id" not in fields:
+            fields.append("project.id")
+        project_ids = snuba_args["filter_keys"].get(
+            "project_id", []
+        )  # only gets used if sorting by project
+        projects = Project.objects.filter(id__in=project_ids).values("slug", "id")
+        aggregations.append(
+            [
+                "transform(project_id, [{}], {}, '')".format(
+                    # Need to use join like this so we don't get a list including Ls which confuses clickhouse
+                    ",".join([six.binary_type(project["id"]) for project in projects]),
+                    [six.binary_type(project["slug"]) for project in projects],
+                ),
+                None,
+                "project",
+            ]
+        )
+
     for field in fields:
         column_additions, agg_additions = resolve_field(field)
         if column_additions:
@@ -1111,10 +1106,7 @@ def resolve_field_list(fields, snuba_args, auto_fields=True):
 
     orderby = snuba_args.get("orderby")
     if orderby:
-        project_id = snuba_args["filter_keys"].get(
-            "project_id", []
-        )  # only gets used if sorting by project
-        orderby = resolve_orderby(orderby, columns, aggregations, project_id)
+        orderby = resolve_orderby(orderby, columns, aggregations)
 
     # If aggregations are present all columns
     # need to be added to the group by so that the query is valid.
