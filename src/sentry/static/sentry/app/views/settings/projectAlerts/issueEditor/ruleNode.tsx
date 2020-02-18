@@ -150,7 +150,7 @@ class RuleNode extends React.Component<Props> {
         {data && <input type="hidden" name="id" value={data.id} />}
         {this.renderRow()}
         <DeleteButton
-          label={t('Delete Rule')}
+          label={t('Delete Node')}
           onClick={onDelete}
           type="button"
           size="small"
