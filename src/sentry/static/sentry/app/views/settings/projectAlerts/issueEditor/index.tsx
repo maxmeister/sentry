@@ -21,6 +21,7 @@ import {
 } from 'app/actionCreators/indicator';
 import {getDisplayName} from 'app/utils/environment';
 import {t} from 'app/locale';
+import Button from 'app/components/button';
 import Form from 'app/views/settings/components/forms/form';
 import LoadingMask from 'app/components/loadingMask';
 import PanelAlert from 'app/components/panels/panelAlert';
@@ -33,6 +34,7 @@ import recreateRoute from 'app/utils/recreateRoute';
 import space from 'app/styles/space';
 import withApi from 'app/utils/withApi';
 
+import Confirm from 'app/components/confirm';
 import RuleNodeList from './ruleNodeList';
 
 const FREQUENCY_CHOICES = [
@@ -154,6 +156,35 @@ class IssueRuleEditor extends React.Component<Props, State> {
     }
   };
 
+  handleDeleteRule = async () => {
+    const {rule} = this.state;
+    const ruleId = isSavedAlertRule(rule) ? `${rule.id}/` : '';
+    const isNew = !ruleId;
+    const {project, organization} = this.props;
+
+    if (isNew) {
+      return;
+    }
+
+    const endpoint = `/projects/${organization.slug}/${project.slug}/rules/${ruleId}`;
+
+    addLoadingMessage(t('Deleting...'));
+
+    try {
+      const resp = await this.api.requestPromise(endpoint, {
+        method: 'DELETE',
+      });
+
+      addSuccessMessage(t('Deleted alert rule'));
+      browserHistory.replace(recreateRoute('', {...this.props, stepBack: -2}));
+    } catch (err) {
+      this.setState({
+        detailedError: err.responseJSON || {__all__: 'Unknown error'},
+      });
+      addErrorMessage(t('There was a problem deleting the alert'));
+    }
+  };
+
   handleCancel = () => {
     const {router} = this.props;
 
@@ -261,6 +292,19 @@ class IssueRuleEditor extends React.Component<Props, State> {
           onSubmit={this.handleSubmit}
           initialData={rule as object}
           submitLabel={t('Save Rule')}
+          extraButton={
+            <Confirm
+              priority="danger"
+              confirmText={t('Delete Rule')}
+              onConfirm={this.handleDeleteRule}
+              header={t('Delete Rule')}
+              message={t('Are you sure you want to delete this rule?')}
+            >
+              <Button priority="danger" type="button">
+                {t('Delete Rule')}
+              </Button>
+            </Confirm>
+          }
         >
           {ruleId && !this.state.rule && <SemiTransparentLoadingMask />}
           <Panel>
